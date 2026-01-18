@@ -18,7 +18,12 @@ const addDays = (dateStr, days) => {
 };
 
 const shortDate = (d) =>
-  d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  d
+    ? new Date(d).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })
+    : "";
 
 /* ------------------ Defaults ------------------ */
 
@@ -33,7 +38,7 @@ const makeGrid = (r, c) =>
   Array.from({ length: r }, () => Array.from({ length: c }, () => null));
 
 const defaultBeds = {
-  "Long Bed A": makeGrid(3, 8),
+  "Main Bed": makeGrid(3, 8),
 };
 
 /* ------------------ App ------------------ */
@@ -81,7 +86,10 @@ export default function App() {
     if (!safeDate(finalDate)) return;
 
     if (!getPlant(plantName)) {
-      setPlants((p) => [...p, { name: plantName, days: 60, springOffset: 0, indoorOffset: null, startMethod: "outdoor" }]);
+      setPlants((p) => [
+        ...p,
+        { name: plantName, days: 60, springOffset: 0, indoorOffset: null, startMethod: "outdoor" },
+      ]);
     }
 
     const [r, c] = selectedSquare;
@@ -94,12 +102,21 @@ export default function App() {
     setSelectedSquare(null);
   };
 
-  /* ------------------ Bed Editor ------------------ */
+  const clearSquare = () => {
+    if (!selectedSquare) return;
+    const [r, c] = selectedSquare;
+    const copy = { ...beds };
+    copy[selectedBed][r][c] = null;
+    setBeds(copy);
+    setSelectedSquare(null);
+  };
+
+  /* ------------------ Bed Controls ------------------ */
 
   const resizeBed = (bed, dr, dc) => {
     const g = beds[bed];
-    let rows = g.length + dr;
-    let cols = g[0].length + dc;
+    const rows = g.length + dr;
+    const cols = g[0].length + dc;
     if (rows < 1 || cols < 1) return;
 
     const newGrid = Array.from({ length: rows }, (_, r) =>
@@ -109,20 +126,46 @@ export default function App() {
     setBeds({ ...beds, [bed]: newGrid });
   };
 
+  const deleteBed = () => {
+    if (Object.keys(beds).length <= 1) return;
+    const copy = { ...beds };
+    delete copy[selectedBed];
+    const next = Object.keys(copy)[0];
+    setBeds(copy);
+    setSelectedBed(next);
+  };
+
+  /* ------------------ Calendar Grid ------------------ */
+
+  const calendar = {};
+  Object.values(beds)
+    .flat()
+    .flat()
+    .forEach((sq) => {
+      if (!sq) return;
+      const outdoor = sq.date;
+      calendar[outdoor] ||= [];
+      calendar[outdoor].push(`${sq.plant} (outdoors)`);
+
+      const indoor = getIndoorDate(sq);
+      if (indoor) {
+        calendar[indoor] ||= [];
+        calendar[indoor].push(`${sq.plant} (indoors)`);
+      }
+    });
+
   /* ------------------ Render ------------------ */
 
   return (
     <div style={{ padding: 16 }}>
       <h1>Garden Planner</h1>
 
-      <div>
-        <button onClick={() => setView("beds")}>Beds</button>{" "}
-        <button onClick={() => setView("calendar")}>Calendar</button>{" "}
-        <button onClick={() => setView("plants")}>Plant Library</button>
-      </div>
+      <button onClick={() => setView("beds")}>Beds</button>{" "}
+      <button onClick={() => setView("calendar")}>Calendar</button>{" "}
+      <button onClick={() => setView("plants")}>Plant Library</button>
 
       <div style={{ marginTop: 10 }}>
-        Spring Frost:{" "}
+        Spring Frost:
         <input type="date" value={springFrost} onChange={(e) => setSpringFrost(e.target.value)} />
       </div>
 
@@ -130,7 +173,7 @@ export default function App() {
 
       {view === "beds" && (
         <>
-          <h2>{selectedBed}</h2>
+          <h2>Beds</h2>
 
           <select value={selectedBed} onChange={(e) => setSelectedBed(e.target.value)}>
             {Object.keys(beds).map((b) => (
@@ -141,6 +184,7 @@ export default function App() {
           <button onClick={() => setBeds({ ...beds, [`New Bed ${Date.now()}`]: makeGrid(3, 6) })}>
             ➕ Add Bed
           </button>
+          <button onClick={deleteBed}>🗑 Delete Bed</button>
 
           <div>
             <button onClick={() => resizeBed(selectedBed, 1, 0)}>+ Row</button>
@@ -151,14 +195,31 @@ export default function App() {
 
           <div>
             Plant:
-            <input value={plantName} onChange={(e) => setPlantName(e.target.value)} list="plants" />
-            <datalist id="plants">{plants.map((p) => <option key={p.name} />)}</datalist>
+            <select value={plantName} onChange={(e) => setPlantName(e.target.value)}>
+              <option value="">-- select --</option>
+              {plants.map((p) => (
+                <option key={p.name}>{p.name}</option>
+              ))}
+            </select>
+            or
+            <input
+              placeholder="Custom name"
+              value={plantName}
+              onChange={(e) => setPlantName(e.target.value)}
+            />
             Date:
             <input type="date" value={plantDate} onChange={(e) => setPlantDate(e.target.value)} />
             <button onClick={assignPlant}>Assign</button>
+            <button onClick={clearSquare}>Clear</button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${beds[selectedBed][0].length}, 1fr)`, gap: 6 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${beds[selectedBed][0].length}, 1fr)`,
+              gap: 6,
+            }}
+          >
             {beds[selectedBed].map((row, r) =>
               row.map((cell, c) => (
                 <div
@@ -189,15 +250,18 @@ export default function App() {
       {view === "calendar" && (
         <>
           <h2>Calendar</h2>
-          {Object.values(beds).flat().flat().map(
-            (sq, i) =>
-              sq && (
-                <div key={i}>
-                  🌱 {sq.plant} outdoors: {shortDate(sq.date)}
-                  {getIndoorDate(sq) && <> | indoors: {shortDate(getIndoorDate(sq))}</>}
-                </div>
-              )
-          )}
+          {Object.keys(calendar)
+            .sort()
+            .map((d) => (
+              <div key={d} style={{ borderBottom: "1px solid #ccc", padding: 4 }}>
+                <strong>{shortDate(d)}</strong>
+                <ul>
+                  {calendar[d].map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
         </>
       )}
 
@@ -206,27 +270,34 @@ export default function App() {
       {view === "plants" && (
         <>
           <h2>Plant Library</h2>
-          <button onClick={() => setPlants([...plants, { name: "New Plant", days: 60, springOffset: 0, indoorOffset: null, startMethod: "outdoor" }])}>
+          <button
+            onClick={() =>
+              setPlants([
+                ...plants,
+                { name: "New Plant", days: 60, springOffset: 0, indoorOffset: null, startMethod: "outdoor" },
+              ])
+            }
+          >
             ➕ Add Plant
           </button>
 
           {plants.map((p, i) => (
             <div key={i} style={{ border: "1px solid #aaa", padding: 8, marginBottom: 8 }}>
               Name <input value={p.name} onChange={(e) => {
-                const copy = [...plants]; copy[i].name = e.target.value; setPlants(copy);
+                const c = [...plants]; c[i].name = e.target.value; setPlants(c);
               }} />
               Days <input type="number" value={p.days} onChange={(e) => {
-                const copy = [...plants]; copy[i].days = +e.target.value; setPlants(copy);
+                const c = [...plants]; c[i].days = +e.target.value; setPlants(c);
               }} />
               Spring Offset <input type="number" value={p.springOffset} onChange={(e) => {
-                const copy = [...plants]; copy[i].springOffset = +e.target.value; setPlants(copy);
+                const c = [...plants]; c[i].springOffset = +e.target.value; setPlants(c);
               }} />
               Indoor Offset <input type="number" value={p.indoorOffset ?? ""} onChange={(e) => {
-                const copy = [...plants]; copy[i].indoorOffset = e.target.value === "" ? null : +e.target.value; setPlants(copy);
+                const c = [...plants]; c[i].indoorOffset = e.target.value === "" ? null : +e.target.value; setPlants(c);
               }} />
-              Start:
+              Start
               <select value={p.startMethod} onChange={(e) => {
-                const copy = [...plants]; copy[i].startMethod = e.target.value; setPlants(copy);
+                const c = [...plants]; c[i].startMethod = e.target.value; setPlants(c);
               }}>
                 <option value="outdoor">Outdoors</option>
                 <option value="indoor">Indoors</option>
